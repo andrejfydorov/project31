@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/go-chi/chi"
-	"project31/pkg/controllers"
+	"project31/internal/controllers"
 )
 
 type Router struct {

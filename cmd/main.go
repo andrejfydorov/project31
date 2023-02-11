@@ -4,9 +4,9 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"log"
 	"net/http"
-	"project31/pkg/controllers"
-	"project31/pkg/repository"
-	"project31/pkg/router"
+	"project31/internal/controllers"
+	"project31/internal/repository"
+	"project31/internal/router"
 )
 
 func main() {

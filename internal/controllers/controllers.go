@@ -7,8 +7,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"project31/pkg/repository"
-	"project31/pkg/user"
+	"project31/internal/repository"
+	"project31/internal/user"
 	"strconv"
 )
 

@@ -1,6 +1,6 @@
 use gousers;
 create table users (
-    id int primary key,
+    id int primary key auto_increment,
     name varchar(30) not null,
     age int not null
 );
