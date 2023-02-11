@@ -22,17 +22,8 @@ func New(_database *repository.Repository) *Controllers {
 	return &c
 }
 
-func (c *Controllers) getMaxId() int {
-	row := c.database.QueryRow("select max(id) from users")
-	var i int
-	err := row.Scan(&i)
-	if err != nil {
-		fmt.Println(err)
-	}
-	return i
-}
-
 func (c *Controllers) Create(writer http.ResponseWriter, request *http.Request) {
+
 	content, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
@@ -49,18 +40,17 @@ func (c *Controllers) Create(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 
-	err = c.database.Exec(fmt.Sprintf("insert into users (id, name, age) values (%d, '%s', %d)", c.getMaxId()+1, u.Name, u.Age))
+	err = c.database.Exec(fmt.Sprintf("insert into users (name, age) values ('%s', %d)", u.Name, u.Age))
 	if err != nil {
 		log.Println(err)
 	}
-	currentUserID := c.getMaxId()
+	currentUserID := c.database.MaxId
 	for _, friend := range u.Friends {
-		i := c.getMaxId() + 1
-		err = c.database.Exec(fmt.Sprintf("insert into users (id, name, age) values (%d, '%s', %d)", i, friend.Name, friend.Age))
+		err = c.database.Exec(fmt.Sprintf("insert into users (name, age) values ('%s', %d)", friend.Name, friend.Age))
 		if err != nil {
 			log.Println(err)
 		}
-		err = c.database.Exec(fmt.Sprintf("insert into friends (userid, friendid) values (%d, %d)", currentUserID, i))
+		err = c.database.Exec(fmt.Sprintf("insert into friends (userid, friendid) values (%d, %d)", currentUserID, c.database.MaxId))
 		if err != nil {
 			log.Println(err)
 		}
