@@ -40,26 +40,31 @@ func (c *Controllers) Create(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 
-	err = c.database.Exec(fmt.Sprintf("insert into users (name, age) values ('%s', %d)", u.Name, u.Age))
+	id, err := c.database.CreateUser(&u)
 	if err != nil {
 		log.Println(err)
 	}
-	currentUserID := c.database.MaxId
-	for _, friend := range u.Friends {
-		err = c.database.Exec(fmt.Sprintf("insert into users (name, age) values ('%s', %d)", friend.Name, friend.Age))
-		if err != nil {
-			log.Println(err)
+
+	if id != -1 {
+		currentUser := c.database.GetUser(id)
+		for _, friend := range u.Friends {
+			id, err = c.database.CreateUser(friend)
+			if err != nil {
+				log.Println(err)
+			}
+			_, err := c.database.CreateFriends(currentUser, friend)
+			if err != nil {
+				log.Println(err)
+			}
 		}
-		err = c.database.Exec(fmt.Sprintf("insert into friends (userid, friendid) values (%d, %d)", currentUserID, c.database.MaxId))
-		if err != nil {
-			log.Println(err)
-		}
+
+		writer.WriteHeader(http.StatusCreated)
+		writer.Write([]byte(fmt.Sprintf("User was created %s and id is %d\n", currentUser.Name, currentUser.Id)))
+		return
 	}
 
-	writer.WriteHeader(http.StatusCreated)
-	writer.Write([]byte(fmt.Sprintf("User was created %s and id is %d\n", u.Name, currentUserID)))
+	writer.WriteHeader(http.StatusInternalServerError)
 	return
-
 }
 
 func (c *Controllers) MakeFriends(writer http.ResponseWriter, request *http.Request) {
@@ -72,8 +77,8 @@ func (c *Controllers) MakeFriends(writer http.ResponseWriter, request *http.Requ
 	defer request.Body.Close()
 
 	var Friends struct {
-		SourceId int `json:"source_id"`
-		TargetId int `json:"target_id"`
+		SourceId int64 `json:"source_id"`
+		TargetId int64 `json:"target_id"`
 	}
 	if err := json.Unmarshal(content, &Friends); err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
@@ -81,78 +86,53 @@ func (c *Controllers) MakeFriends(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	err = c.database.Exec(fmt.Sprintf("insert into friends (userid, friendid) values (%d, %d)", Friends.SourceId, Friends.TargetId))
+	u1 := c.database.GetUser(Friends.SourceId)
+	u2 := c.database.GetUser(Friends.TargetId)
+
+	i, err := c.database.CreateFriends(u1, u2)
 	if err != nil {
 		log.Println(err)
 	}
-
-	row := c.database.QueryRow(fmt.Sprintf("select * from users where id=%d", Friends.SourceId))
-
-	u1 := user.User{}
-	err = row.Scan(&u1.Id, &u1.Name, &u1.Age)
-	if err != nil {
-		fmt.Println(err)
+	if i > 0 {
+		writer.WriteHeader(http.StatusOK)
+		writer.Write([]byte(fmt.Sprintf("%s и %s теперь друзья\n", u1.Name, u2.Name)))
+		return
 	}
 
-	row = c.database.QueryRow(fmt.Sprintf("select * from users where id=%d", Friends.TargetId))
-	u2 := user.User{}
-	err = row.Scan(&u2.Id, &u2.Name, &u2.Age)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte(fmt.Sprintf("%s и %s теперь друзья\n", u1.Name, u2.Name)))
+	writer.WriteHeader(http.StatusBadRequest)
 	return
-
-	//writer.WriteHeader(http.StatusBadRequest)
-	//writer.Write([]byte(fmt.Sprintf("User %d или %d не найден.\n", Friends.SourceId, Friends.TargetId)))
-	//fmt.Printf("User %d или %d не найден.\n", Friends.SourceId, Friends.TargetId)
-	//return
 }
 
 func (c *Controllers) GetFriends(writer http.ResponseWriter, request *http.Request) {
 	responce := ""
 
 	id := chi.URLParam(request, "id")
-	fmt.Println(id + "\n")
+
 	idInt, err := strconv.Atoi(id)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	rows, err := c.database.Query(fmt.Sprintf(
-		"select u2.id, u2.name, u2.age"+
-			" from users u"+
-			" join friends f on f.userid=u.id"+
-			" join users u2 on u2.id=f.friendid"+
-			" where u.id=%d", idInt))
+	users, err := c.database.GetFriends(int64(idInt))
 	if err != nil {
 		log.Println(err)
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		u := user.User{}
-		err := rows.Scan(&u.Id, &u.Name, &u.Age)
-		if err != nil {
-			fmt.Println(err)
-			continue
+	if len(users) > 0 {
+		for _, u := range users {
+			responce += u.ToStringShort()
 		}
-		responce += u.ToStringShort()
+
+		writer.WriteHeader(http.StatusOK)
+		writer.Write([]byte(responce))
+		return
 	}
 
-	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte(responce))
+	writer.WriteHeader(http.StatusBadRequest)
 	return
-
-	//writer.WriteHeader(http.StatusBadRequest)
-	//writer.Write([]byte(fmt.Sprintf("User %d не найден.\n", idInt)))
-	//return
-
 }
 
 func (c *Controllers) Delete(writer http.ResponseWriter, request *http.Request) {
+
 	content, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
@@ -162,44 +142,34 @@ func (c *Controllers) Delete(writer http.ResponseWriter, request *http.Request) 
 	defer request.Body.Close()
 
 	var UserId struct {
-		TargetId int `json:"target_id"`
+		TargetId int64 `json:"target_id"`
 	}
 
 	if err := json.Unmarshal(content, &UserId); err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
 		writer.Write([]byte(err.Error()))
-		//fmt.Println(err)
 		return
 	}
 
-	row := c.database.QueryRow(fmt.Sprintf(fmt.Sprintf("select id, name, age from users where id=%d", UserId.TargetId)))
+	user := c.database.GetUser(UserId.TargetId)
 
-	u := user.User{}
-	err = row.Scan(&u.Id, &u.Name, &u.Age)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	err = c.database.Exec(fmt.Sprintf("delete from friends where userid=%d", UserId.TargetId))
+	i, err := c.database.DeleteUser(UserId.TargetId)
 	if err != nil {
 		log.Println(err)
 	}
 
-	err = c.database.Exec(fmt.Sprintf("delete from users where id=%d", UserId.TargetId))
-	if err != nil {
-		log.Println(err)
+	if i > 0 {
+		writer.WriteHeader(http.StatusOK)
+		writer.Write([]byte(fmt.Sprintf("User was deleted %s\n", user.Name)))
+		return
 	}
 
-	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte(fmt.Sprintf("User was deleted %s\n", u.Name)))
+	writer.WriteHeader(http.StatusBadRequest)
 	return
-
-	//writer.WriteHeader(http.StatusBadRequest)
-	//writer.Write([]byte(fmt.Sprintf("User %d не найден.\n", UserId.TargetId)))
-	//return
 }
 
 func (c *Controllers) Update(writer http.ResponseWriter, request *http.Request) {
+
 	content, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
@@ -217,84 +187,50 @@ func (c *Controllers) Update(writer http.ResponseWriter, request *http.Request) 
 	var Age struct {
 		Age int `json:"new age"`
 	}
+
 	if err := json.Unmarshal(content, &Age); err != nil {
 		writer.WriteHeader(http.StatusInternalServerError)
 		writer.Write([]byte(err.Error()))
 		fmt.Println(err)
 		return
 	}
-	err = c.database.Exec(fmt.Sprintf("update users set age=%d where id=%d", Age.Age, idInt))
+	i, err := c.database.UpdateUser(idInt, Age.Age)
 	if err != nil {
 		log.Println(err)
 	}
 
-	row := c.database.QueryRow(fmt.Sprintf(fmt.Sprintf("select id, name, age from users where id=%d", idInt)))
+	if i > 0 {
+		user := c.database.GetUser(int64(idInt))
 
-	u := user.User{}
-	err = row.Scan(&u.Id, &u.Name, &u.Age)
-	if err != nil {
-		fmt.Println(err)
+		writer.WriteHeader(http.StatusOK)
+		writer.Write([]byte(fmt.Sprintf("Возраст пользователя %s успешно обновлен.\n", user.Name)))
+		return
 	}
 
-	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte(fmt.Sprintf("Возраст пользователя %s успешно обновлен.\n", u.Name)))
+	writer.WriteHeader(http.StatusBadRequest)
 	return
-
-	//writer.WriteHeader(http.StatusBadRequest)
-	//writer.Write([]byte(fmt.Sprintf("User %d не найден.\n", idInt)))
-	//return
-
 }
 
 func (c *Controllers) GetAll(writer http.ResponseWriter, request *http.Request) {
-	var store []*user.User
+
 	responce := ""
 
-	rows, err := c.database.Query("select * from users")
+	users, err := c.database.GetUsers()
 	if err != nil {
 		log.Println(err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		u := user.User{}
-		err := rows.Scan(&u.Id, &u.Name, &u.Age)
-		if err != nil {
-			fmt.Println(err)
-			continue
+	if len(users) > 0 {
+		for _, user := range users {
+			responce += user.ToString() + "\n"
 		}
 
-		store = append(store, &u)
-	}
-
-	for _, _user := range store {
-		rows, err = c.database.Query(fmt.Sprintf(
-			"select u2.id, u2.name, u2.age"+
-				" from users u"+
-				" join friends f on f.userid=u.id"+
-				" join users u2 on u2.id=f.friendid"+
-				" where u.id=%d", _user.Id))
-		if err != nil {
-			log.Println(err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			u := user.User{}
-			err := rows.Scan(&u.Id, &u.Name, &u.Age)
-			if err != nil {
-				fmt.Println(err)
-				continue
-			}
-			_user.Friends = append(_user.Friends, &u)
-		}
-	}
-
-	for _, user := range store {
-		responce += user.ToString() + "\n"
+		writer.WriteHeader(http.StatusOK)
+		writer.Write([]byte(responce))
+		return
 	}
 
 	writer.WriteHeader(http.StatusOK)
-	writer.Write([]byte(responce))
+	writer.Write([]byte("No users"))
 	return
 }
