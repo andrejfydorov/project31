@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+
 	repo := repository.New()
 	defer repo.Close()
 
@@ -23,4 +24,18 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	//done := make(chan os.Signal, 1)
+	//signal.Notify(done, os.Interrupt)
+	//
+	//for {
+	//	select {
+	//	case <-done:
+	//		return
+	//	default:
+	//		func() {
+	//
+	//		}()
+	//
+	//	}
+	//}
 }
