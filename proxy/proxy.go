@@ -1,10 +1,11 @@
 package main
 
 import (
-	"bytes"
-	"io/ioutil"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 )
 
 const proxyAddr string = "localhost:9000"
@@ -29,44 +30,47 @@ func main() {
 
 func handleProxy(w http.ResponseWriter, r *http.Request) {
 
-	content, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(err.Error()))
-		return
-	}
-	defer r.Body.Close()
-
 	if counter == 0 {
-		resp, err := http.Post(firstInstanceHost+r.URL.Path, "text/json", bytes.NewBuffer(content))
+
+		originServerURL, err := url.Parse(firstInstanceHost)
 		if err != nil {
-			log.Fatalln(err)
+			log.Fatal("invalid origin server URL")
 		}
-		respBytes, err := ioutil.ReadAll(resp.Body)
+
+		r.Host = originServerURL.Host
+		r.URL.Host = originServerURL.Host
+
+		originServerResponse, err := http.DefaultClient.Do(r)
 		if err != nil {
-			log.Fatalln(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprint(w, err)
+			return
 		}
-		defer resp.Body.Close()
 
 		w.WriteHeader(http.StatusOK)
-		w.Write(respBytes)
+		io.Copy(w, originServerResponse.Body)
 
 		counter++
 		return
 	}
 
-	resp, err := http.Post(firstInstanceHost+r.URL.Path, "text/json", bytes.NewBuffer(content))
+	originServerURL, err := url.Parse(secondInstanceHost)
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatal("invalid origin server URL")
 	}
-	respBytes, err := ioutil.ReadAll(resp.Body)
+
+	r.Host = originServerURL.Host
+	r.URL.Host = originServerURL.Host
+
+	originServerResponse, err := http.DefaultClient.Do(r)
 	if err != nil {
-		log.Fatalln(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, err)
+		return
 	}
-	defer resp.Body.Close()
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(respBytes)
+	io.Copy(w, originServerResponse.Body)
 
 	counter--
 	return
