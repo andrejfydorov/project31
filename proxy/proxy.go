@@ -1,11 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 )
 
 const proxyAddr string = "localhost:9000"
@@ -18,12 +19,6 @@ var (
 
 func main() {
 	http.HandleFunc("/", handleProxy)
-	http.HandleFunc("/create", handleProxy)
-	http.HandleFunc("/make_friends", handleProxy)
-	http.HandleFunc("/user", handleProxy)
-	http.HandleFunc("/friends/{id:[0-9]+}", handleProxy)
-	http.HandleFunc("/{id:[0-9]+}", handleProxy)
-	http.HandleFunc("/get", handleProxy)
 
 	log.Fatalln(http.ListenAndServe(proxyAddr, nil))
 }
@@ -32,18 +27,28 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	if counter == 0 {
 
-		originServerURL, err := url.Parse(firstInstanceHost)
+		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			log.Fatal("invalid origin server URL")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		url := fmt.Sprintf("%v%v", firstInstanceHost, r.URL)
+
+		newreq, err := http.NewRequest(r.Method, url, bytes.NewReader(body))
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 
-		r.Host = originServerURL.Host
-		r.URL.Host = originServerURL.Host
+		newreq.Header.Set("Content-Type", "application/json")
 
-		originServerResponse, err := http.DefaultClient.Do(r)
+		client := &http.Client{}
+
+		originServerResponse, err := client.Do(newreq)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = fmt.Fprint(w, err)
 			return
 		}
 
@@ -54,18 +59,28 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originServerURL, err := url.Parse(secondInstanceHost)
+	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		log.Fatal("invalid origin server URL")
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	url := fmt.Sprintf("%v%v", secondInstanceHost, r.URL)
+
+	newreq, err := http.NewRequest(r.Method, url, bytes.NewReader(body))
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
-	r.Host = originServerURL.Host
-	r.URL.Host = originServerURL.Host
+	newreq.Header.Set("Content-Type", "application/json")
 
-	originServerResponse, err := http.DefaultClient.Do(r)
+	client := &http.Client{}
+
+	originServerResponse, err := client.Do(newreq)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprint(w, err)
 		return
 	}
 
